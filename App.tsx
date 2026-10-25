@@ -3,34 +3,474 @@ import {
   SafeAreaView,
   ScrollView,
   StatusBar,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import {
-  computeDistanceKm,
-  INITIAL_COMPLETED_RIDE,
-  INITIAL_VEHICLES,
-  PRESET_LOCATIONS,
-} from './src/data';
-import { COLORS, styles } from './src/styles';
-import {
-  fetchFleetAndRides,
-  isSupabaseConfigured,
-  upsertRideInSupabase,
-} from './src/supabaseClient';
-import {
-  AppRole,
-  LiveTelemetry,
-  PresetLocation,
-  RideRequest,
-  SortOption,
-  TripStatus,
-  Vehicle,
-  VehicleCategory,
-} from './src/types';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+// ==========================================
+// 1. TYPES & INTERFACES
+// ==========================================
+export type AppRole = 'RIDER' | 'DRIVER';
+export type VehicleCategory = 'ALL' | 'SEDAN' | 'SUV' | 'ELECTRIC' | 'LUXURY' | 'ECONOMY';
+export type SortOption = 'RECOMMENDED' | 'PRICE_LOW_TO_HIGH' | 'HIGHEST_RATED' | 'FASTEST_ETA';
+export type TripStatus =
+  | 'REQUESTED'
+  | 'ACCEPTED'
+  | 'ARRIVED_AT_PICKUP'
+  | 'IN_TRANSIT'
+  | 'COMPLETED'
+  | 'CANCELLED';
+
+export interface PresetLocation {
+  id: string;
+  name: string;
+  address: string;
+  zone: string;
+  lat: number;
+  lng: number;
+}
+
+export interface Vehicle {
+  id: string;
+  name: string;
+  brand: string;
+  category: Exclude<VehicleCategory, 'ALL'>;
+  pricePerKm: number;
+  baseFare: number;
+  seats: number;
+  luggage: number;
+  rating: number;
+  tripsCount: number;
+  transmission: string;
+  rangeOrFuel: string;
+  licensePlate: string;
+  driverName: string;
+  driverRating: number;
+  driverPhone: string;
+  isAvailable: boolean;
+  etaMinutes: number;
+  accentColor: string;
+  features: string[];
+}
+
+export interface RideRequest {
+  id: string;
+  vehicleId: string;
+  vehicleName: string;
+  vehicleCategory: string;
+  licensePlate: string;
+  driverName: string;
+  driverRating: number;
+  driverPhone: string;
+  riderName: string;
+  riderPhone: string;
+  pickupName: string;
+  pickupAddress: string;
+  pickupLat: number;
+  pickupLng: number;
+  dropoffName: string;
+  dropoffAddress: string;
+  dropoffLat: number;
+  dropoffLng: number;
+  distanceKm: number;
+  durationMinutes: number;
+  baseFare: number;
+  distanceFare: number;
+  serviceFee: number;
+  totalFare: number;
+  status: TripStatus;
+  paymentMethod: string;
+  userRating: number;
+  createdAt: number;
+}
+
+export interface LiveTelemetry {
+  driverLat: number;
+  driverLng: number;
+  bearingDegrees: number;
+  speedKmh: number;
+  progressFraction: number;
+  remainingKm: number;
+  remainingMinutes: number;
+  statusMessage: string;
+}
+
+// ==========================================
+// 2. SEED DATA & DISTANCE CALCULATOR
+// ==========================================
+const PRESET_LOCATIONS: PresetLocation[] = [
+  {
+    id: 'loc_downtown',
+    name: 'Metropolis Grand Central',
+    address: '100 Market St, Financial District',
+    zone: 'Downtown Core',
+    lat: 37.7936,
+    lng: -122.3958,
+  },
+  {
+    id: 'loc_airport',
+    name: 'International Terminal T2',
+    address: 'Airport Access Rd, Gate B4',
+    zone: 'Airport Zone',
+    lat: 37.6213,
+    lng: -122.379,
+  },
+  {
+    id: 'loc_tech_park',
+    name: 'Silicon Harbor Innovation Hub',
+    address: '450 Mission Bay Blvd',
+    zone: 'Tech District',
+    lat: 37.7705,
+    lng: -122.3892,
+  },
+  {
+    id: 'loc_marina',
+    name: 'Bayfront Marina & Pier 39',
+    address: '2100 Embarcadero Promenade',
+    zone: 'Waterfront',
+    lat: 37.8087,
+    lng: -122.4098,
+  },
+  {
+    id: 'loc_medical',
+    name: 'Parnassus Medical Center',
+    address: '505 Parnassus Ave, Heights',
+    zone: 'West Medical',
+    lat: 37.7631,
+    lng: -122.4586,
+  },
+];
+
+const INITIAL_VEHICLES: Vehicle[] = [
+  {
+    id: 'veh_01',
+    name: 'Model S Plaid',
+    brand: 'Tesla',
+    category: 'ELECTRIC',
+    pricePerKm: 2.4,
+    baseFare: 6.5,
+    seats: 4,
+    luggage: 3,
+    rating: 4.97,
+    tripsCount: 412,
+    transmission: 'EV Direct',
+    rangeOrFuel: '637 km Range',
+    licensePlate: 'EV-904X',
+    driverName: 'Marcus Vance',
+    driverRating: 4.96,
+    driverPhone: '+1 (555) 234-8910',
+    isAvailable: true,
+    etaMinutes: 2,
+    accentColor: '#00D2FF',
+    features: ['Autopilot Glass Roof', 'Ultra-Fast Wi-Fi', 'Heated Seats'],
+  },
+  {
+    id: 'veh_02',
+    name: 'Escalade IQ Executive',
+    brand: 'Cadillac',
+    category: 'SUV',
+    pricePerKm: 3.2,
+    baseFare: 9.0,
+    seats: 7,
+    luggage: 6,
+    rating: 4.94,
+    tripsCount: 289,
+    transmission: 'Automatic',
+    rangeOrFuel: '720 km EV',
+    licensePlate: 'SUV-771K',
+    driverName: 'Elena Rostova',
+    driverRating: 4.93,
+    driverPhone: '+1 (555) 390-1122',
+    isAvailable: true,
+    etaMinutes: 4,
+    accentColor: '#FFB300',
+    features: ['7 Captain Seats', 'XXL Cargo Hold', 'Rear Climate Zone'],
+  },
+  {
+    id: 'veh_03',
+    name: 'EQS 580 Pinnacle',
+    brand: 'Mercedes-Benz',
+    category: 'LUXURY',
+    pricePerKm: 3.85,
+    baseFare: 12.0,
+    seats: 4,
+    luggage: 3,
+    rating: 4.99,
+    tripsCount: 198,
+    transmission: 'EV Direct',
+    rangeOrFuel: '560 km Range',
+    licensePlate: 'VIP-001M',
+    driverName: 'Julian Sterling',
+    driverRating: 4.99,
+    driverPhone: '+1 (555) 881-4401',
+    isAvailable: true,
+    etaMinutes: 5,
+    accentColor: '#B388FF',
+    features: ['Executive Rear Lounge', 'Massage Seats', 'Chauffeur Service'],
+  },
+  {
+    id: 'veh_04',
+    name: 'Camry Hybrid XSE',
+    brand: 'Toyota',
+    category: 'SEDAN',
+    pricePerKm: 1.65,
+    baseFare: 4.0,
+    seats: 4,
+    luggage: 2,
+    rating: 4.89,
+    tripsCount: 845,
+    transmission: 'Automatic',
+    rangeOrFuel: '22 km/L Hybrid',
+    licensePlate: 'CAB-408T',
+    driverName: 'David Chen',
+    driverRating: 4.91,
+    driverPhone: '+1 (555) 612-7734',
+    isAvailable: true,
+    etaMinutes: 1,
+    accentColor: '#00E676',
+    features: ['USB-C Fast Charge', 'Fuel Saver', 'Spacious Legroom'],
+  },
+  {
+    id: 'veh_05',
+    name: 'IONIQ 5 N-Line',
+    brand: 'Hyundai',
+    category: 'ELECTRIC',
+    pricePerKm: 2.05,
+    baseFare: 5.0,
+    seats: 5,
+    luggage: 3,
+    rating: 4.92,
+    tripsCount: 360,
+    transmission: 'EV Direct',
+    rangeOrFuel: '488 km Range',
+    licensePlate: 'EV-512H',
+    driverName: 'Sophia Patel',
+    driverRating: 4.95,
+    driverPhone: '+1 (555) 901-3345',
+    isAvailable: true,
+    etaMinutes: 3,
+    accentColor: '#00D2FF',
+    features: ['V2L Power Outlet', 'Reclining Lounge', 'Zero Emissions'],
+  },
+  {
+    id: 'veh_06',
+    name: 'Prius Prime Eco',
+    brand: 'Toyota',
+    category: 'ECONOMY',
+    pricePerKm: 1.25,
+    baseFare: 3.0,
+    seats: 4,
+    luggage: 2,
+    rating: 4.86,
+    tripsCount: 1120,
+    transmission: 'Automatic',
+    rangeOrFuel: '26 km/L PHEV',
+    licensePlate: 'ECO-209P',
+    driverName: 'Mateo Silva',
+    driverRating: 4.88,
+    driverPhone: '+1 (555) 443-9087',
+    isAvailable: true,
+    etaMinutes: 2,
+    accentColor: '#00E676',
+    features: ['Budget Friendly', 'Commuter Express', 'Clean Interior'],
+  },
+];
+
+const INITIAL_COMPLETED_RIDE: RideRequest = {
+  id: 'ride_seed_101',
+  vehicleId: 'veh_01',
+  vehicleName: 'Tesla Model S Plaid',
+  vehicleCategory: 'ELECTRIC',
+  licensePlate: 'EV-904X',
+  driverName: 'Marcus Vance',
+  driverRating: 4.96,
+  driverPhone: '+1 (555) 234-8910',
+  riderName: 'Alex Rivera',
+  riderPhone: '+1 (555) 019-2834',
+  pickupName: 'Silicon Harbor Innovation Hub',
+  pickupAddress: '450 Mission Bay Blvd',
+  pickupLat: 37.7705,
+  pickupLng: -122.3892,
+  dropoffName: 'Metropolis Grand Central',
+  dropoffAddress: '100 Market St, Financial District',
+  dropoffLat: 37.7936,
+  dropoffLng: -122.3958,
+  distanceKm: 4.8,
+  durationMinutes: 12,
+  baseFare: 6.5,
+  distanceFare: 11.52,
+  serviceFee: 1.98,
+  totalFare: 20.0,
+  status: 'COMPLETED',
+  paymentMethod: 'Supabase Pay •••• 4242',
+  userRating: 5,
+  createdAt: Date.now() - 3600000 * 3,
+};
+
+function computeDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.max(1.8, Number((R * c * 1.32).toFixed(1)));
+}
+
+// ==========================================
+// 3. SUPABASE CLIENT & HELPERS
+// ==========================================
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+
+const isSupabaseConfigured =
+  SUPABASE_URL.startsWith('https://') &&
+  SUPABASE_URL.includes('.supabase.co') &&
+  SUPABASE_ANON_KEY.length > 10 &&
+  SUPABASE_ANON_KEY !== 'your-supabase-anon-key';
+
+const supabase: SupabaseClient | null = isSupabaseConfigured
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+async function fetchFleetAndRides(): Promise<{
+  vehicles: Vehicle[];
+  rides: RideRequest[];
+  connected: boolean;
+}> {
+  if (!supabase) {
+    return {
+      vehicles: INITIAL_VEHICLES,
+      rides: [INITIAL_COMPLETED_RIDE],
+      connected: false,
+    };
+  }
+
+  try {
+    const [{ data: vData }, { data: rData }] = await Promise.all([
+      supabase.from('vehicles').select('*'),
+      supabase.from('rides').select('*').order('created_at', { ascending: false }).limit(50),
+    ]);
+
+    const vehicles: Vehicle[] =
+      vData && vData.length > 0
+        ? vData.map((row: any) => ({
+            id: row.id,
+            name: row.name,
+            brand: row.brand,
+            category: row.category || 'SEDAN',
+            pricePerKm: row.price_per_km ?? 2.0,
+            baseFare: row.base_fare ?? 5.0,
+            seats: row.seats ?? 4,
+            luggage: row.luggage ?? 2,
+            rating: row.rating ?? 4.9,
+            tripsCount: row.trips_count ?? 100,
+            transmission: row.transmission ?? 'Automatic',
+            rangeOrFuel: row.range_or_fuel ?? '500 km Range',
+            licensePlate: row.license_plate ?? 'RF-101',
+            driverName: row.driver_name ?? 'Partner Driver',
+            driverRating: row.driver_rating ?? 4.95,
+            driverPhone: row.driver_phone ?? '+1 555-234-8910',
+            isAvailable: row.is_available ?? true,
+            etaMinutes: row.eta_minutes ?? 3,
+            accentColor: '#00D2FF',
+            features: (row.features_csv || 'AC,Fast Charge,GPS').split(','),
+          }))
+        : INITIAL_VEHICLES;
+
+    const rides: RideRequest[] =
+      rData && rData.length > 0
+        ? rData.map((row: any) => ({
+            id: row.id,
+            vehicleId: row.vehicle_id,
+            vehicleName: row.vehicle_name,
+            vehicleCategory: row.vehicle_category,
+            licensePlate: row.license_plate,
+            driverName: row.driver_name,
+            driverRating: row.driver_rating,
+            driverPhone: row.driver_phone,
+            riderName: row.rider_name,
+            riderPhone: row.rider_phone,
+            pickupName: row.pickup_name,
+            pickupAddress: row.pickup_address,
+            pickupLat: row.pickup_lat,
+            pickupLng: row.pickup_lng,
+            dropoffName: row.dropoff_name,
+            dropoffAddress: row.dropoff_address,
+            dropoffLat: row.dropoff_lat,
+            dropoffLng: row.dropoff_lng,
+            distanceKm: row.distance_km,
+            durationMinutes: row.duration_minutes,
+            baseFare: row.base_fare,
+            distanceFare: row.distance_fare,
+            serviceFee: row.service_fee,
+            totalFare: row.total_fare,
+            status: row.status as TripStatus,
+            paymentMethod: row.payment_method,
+            userRating: row.user_rating,
+            createdAt: row.created_at,
+          }))
+        : [INITIAL_COMPLETED_RIDE];
+
+    return { vehicles, rides, connected: true };
+  } catch {
+    return {
+      vehicles: INITIAL_VEHICLES,
+      rides: [INITIAL_COMPLETED_RIDE],
+      connected: false,
+    };
+  }
+}
+
+async function upsertRideInSupabase(ride: RideRequest): Promise<void> {
+  if (!supabase) return;
+  try {
+    await supabase.from('rides').upsert({
+      id: ride.id,
+      vehicle_id: ride.vehicleId,
+      vehicle_name: ride.vehicleName,
+      vehicle_category: ride.vehicleCategory,
+      license_plate: ride.licensePlate,
+      driver_name: ride.driverName,
+      driver_rating: ride.driverRating,
+      driver_phone: ride.driverPhone,
+      rider_name: ride.riderName,
+      rider_phone: ride.riderPhone,
+      pickup_name: ride.pickupName,
+      pickup_address: ride.pickupAddress,
+      pickup_lat: ride.pickupLat,
+      pickup_lng: ride.pickupLng,
+      dropoff_name: ride.dropoffName,
+      dropoff_address: ride.dropoffAddress,
+      dropoff_lat: ride.dropoffLat,
+      dropoff_lng: ride.dropoffLng,
+      distance_km: ride.distanceKm,
+      duration_minutes: ride.durationMinutes,
+      base_fare: ride.baseFare,
+      distance_fare: ride.distanceFare,
+      service_fee: ride.serviceFee,
+      total_fare: ride.totalFare,
+      status: ride.status,
+      payment_method: ride.paymentMethod,
+      user_rating: ride.userRating,
+      created_at: ride.createdAt,
+    });
+  } catch {
+    // Graceful local fallback
+  }
+}
+
+// ==========================================
+// 4. MAIN APPLICATION COMPONENT
+// ==========================================
 export default function App() {
   const [role, setRole] = useState<AppRole>('RIDER');
   const [activeTab, setActiveTab] = useState<number>(0);
@@ -519,7 +959,6 @@ export default function App() {
         {/* LIVE TRIP TRACKING OR DRIVER PARTNER CONSOLE */}
         {((role === 'RIDER' && activeTab === 1) || (role === 'DRIVER' && activeTab === 0)) && (
           <>
-            {/* Interactive Live Telemetry Map View */}
             <View style={styles.mapContainer}>
               <View style={styles.rowBetween}>
                 <View
@@ -539,7 +978,6 @@ export default function App() {
                 </View>
               </View>
 
-              {/* Animated Visual Route Progress Track */}
               <View style={{ marginVertical: 20 }}>
                 <View
                   style={{
@@ -582,7 +1020,6 @@ export default function App() {
               </View>
             </View>
 
-            {/* Driver Mode Online Toggle & Incoming Ride Dispatch Card */}
             {role === 'DRIVER' && (
               <View style={styles.vehicleCard}>
                 <View style={styles.rowBetween}>
@@ -623,7 +1060,6 @@ export default function App() {
               </View>
             )}
 
-            {/* Active Ride Control Card */}
             {activeRide && (
               <View
                 style={[
@@ -777,3 +1213,271 @@ export default function App() {
     </SafeAreaView>
   );
 }
+
+// ==========================================
+// 5. STYLES
+// ==========================================
+const COLORS = {
+  obsidian: '#0B0F17',
+  slateSurface: '#151C28',
+  slateCard: '#1E293B',
+  slateElevated: '#283548',
+  border: '#334155',
+  cyan: '#00D2FF',
+  amber: '#FFB300',
+  emerald: '#00E676',
+  coral: '#FF5252',
+  white: '#F1F5F9',
+  gray: '#94A3B8',
+};
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: COLORS.obsidian,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: COLORS.slateSurface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  brandTitle: {
+    color: COLORS.white,
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  brandSub: {
+    color: COLORS.cyan,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  roleToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.slateCard,
+    borderRadius: 999,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  rolePill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  rolePillActiveRider: {
+    backgroundColor: COLORS.cyan,
+  },
+  rolePillActiveDriver: {
+    backgroundColor: COLORS.amber,
+  },
+  roleText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.gray,
+  },
+  roleTextActive: {
+    color: COLORS.obsidian,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 100,
+    gap: 14,
+  },
+  heroCard: {
+    backgroundColor: '#0E2238',
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: COLORS.cyan,
+  },
+  heroBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(0, 210, 255, 0.16)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    marginBottom: 10,
+  },
+  heroBadgeText: {
+    color: COLORS.cyan,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  heroTitle: {
+    color: COLORS.white,
+    fontSize: 22,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  heroSubtitle: {
+    color: COLORS.gray,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  searchInput: {
+    backgroundColor: COLORS.slateSurface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: COLORS.white,
+    fontSize: 14,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: COLORS.slateSurface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  chipSelected: {
+    backgroundColor: COLORS.cyan,
+    borderColor: COLORS.cyan,
+  },
+  chipText: {
+    color: COLORS.white,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  chipTextSelected: {
+    color: COLORS.obsidian,
+    fontWeight: '800',
+  },
+  vehicleCard: {
+    backgroundColor: COLORS.slateSurface,
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    gap: 10,
+  },
+  rowBetween: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  categoryBadge: {
+    backgroundColor: 'rgba(0, 210, 255, 0.16)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  categoryBadgeText: {
+    color: COLORS.cyan,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  vehicleTitle: {
+    color: COLORS.white,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  metaText: {
+    color: COLORS.gray,
+    fontSize: 13,
+  },
+  specsBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.slateCard,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  specText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  priceLarge: {
+    color: COLORS.white,
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  primaryButton: {
+    backgroundColor: COLORS.cyan,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButtonText: {
+    color: COLORS.obsidian,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  amberButton: {
+    backgroundColor: COLORS.amber,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emeraldButton: {
+    backgroundColor: COLORS.emerald,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  outlineButton: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapContainer: {
+    height: 250,
+    backgroundColor: '#08121E',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 14,
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+  },
+  bottomNav: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.slateSurface,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    justifyContent: 'space-around',
+  },
+  navItem: {
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+  },
+  navItemActive: {
+    backgroundColor: 'rgba(0, 210, 255, 0.16)',
+  },
+  navText: {
+    color: COLORS.gray,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  navTextActive: {
+    color: COLORS.cyan,
+  },
+});
