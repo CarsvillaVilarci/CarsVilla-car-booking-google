@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">RideFlow</string>
+    <string name="mode_rider">Rider</string>
+    <string name="mode_driver">Driver</string>
+    <string name="tab_fleet">Vehicles</string>
+    <string name="tab_live_trip">Live Trip</string>
+    <string name="tab_history">Trips</string>
+    <string name="tab_supabase">Database</string>
+    <string name="tab_driver_console">Dispatch</string>
+    <string name="tab_driver_earnings">Earnings</string>
+    <string name="hero_title">Book Your Ride or Rent a Fleet</string>
+    <string name="hero_subtitle">Instant dispatch, transparent pricing, real-time GPS tracking</string>
+    <string name="search_vehicles_placeholder">Search model, brand, or feature...</string>
+    <string name="filter_all">All Fleet</string>
+    <string name="filter_sedan">Sedan</string>
+    <string name="filter_suv">SUV</string>
+    <string name="filter_ev">Electric</string>
+    <string name="filter_luxury">Luxury</string>
+    <string name="filter_economy">Economy</string>
+    <string name="btn_book_vehicle">Book Vehicle</string>
+    <string name="btn_confirm_booking">Request Ride Now</string>
+    <string name="driver_status_online">ONLINE - RECEIVING REQUESTS</string>
+    <string name="driver_status_offline">OFFLINE - TAP TO GO ONLINE</string>
+    <string name="btn_accept_ride">Accept Dispatch</string>
+    <string name="btn_decline_ride">Decline</string>
+    <string name="btn_simulate_request">Simulate Incoming Ride Request</string>
+    <string name="supabase_status_connected">Supabase Connected</string>
+    <string name="supabase_status_local">Offline Room DB Active</string>
+</resources>

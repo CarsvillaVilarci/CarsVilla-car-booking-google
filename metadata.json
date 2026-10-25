@@ -1,0 +1,6 @@
+{
+  "name": "RideFlow",
+  "description": "Vehicle booking and real-time driver dispatch network with live map tracking and Supabase integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
