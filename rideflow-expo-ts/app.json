@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "RideFlow",
+    "slug": "rideflow-mobility",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0B0F17"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.aistudio.rideflow"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0F17"
+      },
+      "package": "com.aistudio.rideflow.kxmpzq"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
