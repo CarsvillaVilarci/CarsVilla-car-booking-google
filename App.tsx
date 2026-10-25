@@ -9,7 +9,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // ==========================================
 // 1. TYPES & INTERFACES
@@ -326,10 +325,10 @@ function computeDistanceKm(lat1: number, lon1: number, lat2: number, lon2: numbe
 }
 
 // ==========================================
-// 3. SUPABASE CLIENT & HELPERS
+// 3. SUPABASE REST CLIENT (ZERO EXTERNAL DEPS)
 // ==========================================
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL || '').trim().replace(/\/$/, '');
+const SUPABASE_ANON_KEY = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '').trim();
 
 const isSupabaseConfigured =
   SUPABASE_URL.startsWith('https://') &&
@@ -337,16 +336,12 @@ const isSupabaseConfigured =
   SUPABASE_ANON_KEY.length > 10 &&
   SUPABASE_ANON_KEY !== 'your-supabase-anon-key';
 
-const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : null;
-
 async function fetchFleetAndRides(): Promise<{
   vehicles: Vehicle[];
   rides: RideRequest[];
   connected: boolean;
 }> {
-  if (!supabase) {
+  if (!isSupabaseConfigured) {
     return {
       vehicles: INITIAL_VEHICLES,
       rides: [INITIAL_COMPLETED_RIDE],
@@ -355,13 +350,21 @@ async function fetchFleetAndRides(): Promise<{
   }
 
   try {
-    const [{ data: vData }, { data: rData }] = await Promise.all([
-      supabase.from('vehicles').select('*'),
-      supabase.from('rides').select('*').order('created_at', { ascending: false }).limit(50),
+    const headers = {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    };
+
+    const [vRes, rRes] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/vehicles?select=*`, { headers }),
+      fetch(`${SUPABASE_URL}/rest/v1/rides?select=*&order=created_at.desc&limit=50`, { headers }),
     ]);
 
+    const vData = vRes.ok ? await vRes.json() : [];
+    const rData = rRes.ok ? await rRes.json() : [];
+
     const vehicles: Vehicle[] =
-      vData && vData.length > 0
+      Array.isArray(vData) && vData.length > 0
         ? vData.map((row: any) => ({
             id: row.id,
             name: row.name,
@@ -387,7 +390,7 @@ async function fetchFleetAndRides(): Promise<{
         : INITIAL_VEHICLES;
 
     const rides: RideRequest[] =
-      rData && rData.length > 0
+      Array.isArray(rData) && rData.length > 0
         ? rData.map((row: any) => ({
             id: row.id,
             vehicleId: row.vehicle_id,
@@ -431,37 +434,46 @@ async function fetchFleetAndRides(): Promise<{
 }
 
 async function upsertRideInSupabase(ride: RideRequest): Promise<void> {
-  if (!supabase) return;
+  if (!isSupabaseConfigured) return;
   try {
-    await supabase.from('rides').upsert({
-      id: ride.id,
-      vehicle_id: ride.vehicleId,
-      vehicle_name: ride.vehicleName,
-      vehicle_category: ride.vehicleCategory,
-      license_plate: ride.licensePlate,
-      driver_name: ride.driverName,
-      driver_rating: ride.driverRating,
-      driver_phone: ride.driverPhone,
-      rider_name: ride.riderName,
-      rider_phone: ride.riderPhone,
-      pickup_name: ride.pickupName,
-      pickup_address: ride.pickupAddress,
-      pickup_lat: ride.pickupLat,
-      pickup_lng: ride.pickupLng,
-      dropoff_name: ride.dropoffName,
-      dropoff_address: ride.dropoffAddress,
-      dropoff_lat: ride.dropoffLat,
-      dropoff_lng: ride.dropoffLng,
-      distance_km: ride.distanceKm,
-      duration_minutes: ride.durationMinutes,
-      base_fare: ride.baseFare,
-      distance_fare: ride.distanceFare,
-      service_fee: ride.serviceFee,
-      total_fare: ride.totalFare,
-      status: ride.status,
-      payment_method: ride.paymentMethod,
-      user_rating: ride.userRating,
-      created_at: ride.createdAt,
+    await fetch(`${SUPABASE_URL}/rest/v1/rides`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify({
+        id: ride.id,
+        vehicle_id: ride.vehicleId,
+        vehicle_name: ride.vehicleName,
+        vehicle_category: ride.vehicleCategory,
+        license_plate: ride.licensePlate,
+        driver_name: ride.driverName,
+        driver_rating: ride.driverRating,
+        driver_phone: ride.driverPhone,
+        rider_name: ride.riderName,
+        rider_phone: ride.riderPhone,
+        pickup_name: ride.pickupName,
+        pickup_address: ride.pickupAddress,
+        pickup_lat: ride.pickupLat,
+        pickup_lng: ride.pickupLng,
+        dropoff_name: ride.dropoffName,
+        dropoff_address: ride.dropoffAddress,
+        dropoff_lat: ride.dropoffLat,
+        dropoff_lng: ride.dropoffLng,
+        distance_km: ride.distanceKm,
+        duration_minutes: ride.durationMinutes,
+        base_fare: ride.baseFare,
+        distance_fare: ride.distanceFare,
+        service_fee: ride.serviceFee,
+        total_fare: ride.totalFare,
+        status: ride.status,
+        payment_method: ride.paymentMethod,
+        user_rating: ride.userRating,
+        created_at: ride.createdAt,
+      }),
     });
   } catch {
     // Graceful local fallback
@@ -1135,7 +1147,7 @@ export default function App() {
               <Text style={styles.vehicleTitle}>Supabase Backend Status</Text>
               <Text style={styles.metaText}>
                 {isSupabaseConfigured
-                  ? 'Connected to Supabase (@supabase/supabase-js)'
+                  ? 'Connected to Supabase REST API'
                   : 'Running with Local Fallback State. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in .env'}
               </Text>
             </View>
