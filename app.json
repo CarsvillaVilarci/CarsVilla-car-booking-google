@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "RideFlow",
+    "name": "Vride",
     "slug": "rideflow-mobility",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
     "splash": {
-      "backgroundColor": "#0B0F17"
+      "backgroundColor": "#FBF5F4"
     },
     "ios": {
       "supportsTablet": true,
@@ -14,12 +14,15 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0B0F17"
+        "backgroundColor": "#FBF5F4"
       },
       "package": "com.aistudio.rideflow.kxmpzq"
     },
     "web": {
       "bundler": "metro"
-    }
+    },
+    "plugins": [
+      "expo-asset"
+    ]
   }
 }
